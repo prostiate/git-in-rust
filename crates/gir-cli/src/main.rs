@@ -2,8 +2,8 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    cat_file, config, fsck, gc, hash_object, index_pack, init, ls_tree, pack_objects,
-    unpack_objects,
+    cat_file, config, fsck, gc, hash_object, index_pack, init, ls_tree, pack_objects, reflog,
+    rev_parse, symbolic_ref, undo, unpack_objects, update_ref,
 };
 
 #[derive(Debug, Parser)]
@@ -54,6 +54,24 @@ enum Commands {
 
     /// Cleanup unnecessary files and optimize the local repository into packfiles
     Gc(gc::GcArgs),
+
+    /// Update the object name stored in a ref safely with compare-and-swap
+    #[command(name = "update-ref")]
+    UpdateRef(update_ref::UpdateRefArgs),
+
+    /// Read and modify symbolic references
+    #[command(name = "symbolic-ref")]
+    SymbolicRef(symbolic_ref::SymbolicRefArgs),
+
+    /// Pick out and massage parameters and revision expressions
+    #[command(name = "rev-parse")]
+    RevParse(rev_parse::RevParseArgs),
+
+    /// Manage reflog information
+    Reflog(reflog::ReflogArgs),
+
+    /// Restore working tree, index, and HEAD from a pre-operation safety snapshot
+    Undo(undo::UndoArgs),
 }
 
 fn main() {
@@ -69,6 +87,11 @@ fn main() {
         Commands::PackObjects(args) => pack_objects::run(args),
         Commands::Fsck(args) => fsck::run(args),
         Commands::Gc(args) => gc::run(args),
+        Commands::UpdateRef(args) => update_ref::run(args),
+        Commands::SymbolicRef(args) => symbolic_ref::run(args),
+        Commands::RevParse(args) => rev_parse::run(args),
+        Commands::Reflog(args) => reflog::run(args),
+        Commands::Undo(args) => undo::run(args),
     };
 
     if let Err(err) = result {

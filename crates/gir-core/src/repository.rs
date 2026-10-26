@@ -8,6 +8,8 @@ use crate::config::GitConfig;
 use crate::error::GirError;
 use crate::hash::ObjectId;
 use crate::object::commit::Signature;
+use crate::refs::RefStore;
+use crate::revision::parse_revision;
 use crate::storage::atomic::LockFile;
 use crate::storage::ObjectDatabase;
 
@@ -166,6 +168,11 @@ impl Repository {
         &self.odb
     }
 
+    #[inline]
+    pub fn refs(&self) -> RefStore {
+        RefStore::new(&self.git_dir)
+    }
+
     /// Loads the cascaded configuration (`~/.gitconfig` + `.git/config`) for this repository.
     pub fn config(&self) -> Result<GitConfig, GirError> {
         let local_path = self.git_dir.join("config");
@@ -216,142 +223,16 @@ impl Repository {
         Ok(Signature::now(name, email))
     }
 
-    /// Resolves an object specification (`HEAD`, branch/tag ref, 40-char SHA, or short SHA prefix)
-    /// to a concrete `ObjectId`.
+    /// Resolves any Git revision expression (`HEAD`, `HEAD~2^2`, `v1.0^{tree}`, `main@{1}`,
+    /// branch/tag ref, 40-char SHA, or short SHA prefix) to a concrete `ObjectId`.
     pub fn resolve_object(&self, spec: &str) -> Result<ObjectId, GirError> {
-        let spec = spec.trim();
-
-        // 1. Check `HEAD` or `@`
-        if spec == "HEAD" || spec == "@" {
-            return self.resolve_ref_to_oid("HEAD");
-        }
-
-        // 2. Check explicit/short ref names (`refs/...`, `heads/...`, `tags/...`)
-        let candidate_refs = [
-            spec.to_string(),
-            format!("refs/{spec}"),
-            format!("refs/tags/{spec}"),
-            format!("refs/heads/{spec}"),
-            format!("refs/remotes/{spec}"),
-        ];
-        for cand in &candidate_refs {
-            if let Ok(oid) = self.resolve_ref_to_oid(cand) {
-                return Ok(oid);
-            }
-        }
-
-        // 3. Fall back to full or prefix hexadecimal ObjectId lookup
-        self.odb.resolve_prefix(spec)
-    }
-
-    fn resolve_ref_to_oid(&self, ref_name: &str) -> Result<ObjectId, GirError> {
-        let mut current_ref = ref_name.to_string();
-        for _ in 0..10 {
-            let ref_path = self.git_dir.join(&current_ref);
-            if ref_path.is_file() {
-                let content = fs::read_to_string(&ref_path)?;
-                let trimmed = content.trim();
-                if let Some(target) = trimmed.strip_prefix("ref:") {
-                    current_ref = target.trim().to_string();
-                    continue;
-                }
-                return ObjectId::from_hex(trimmed);
-            }
-            if let Some(oid) = self.lookup_packed_ref(&current_ref)? {
-                return Ok(oid);
-            }
-            break;
-        }
-        Err(GirError::ObjectNotFound(ref_name.to_string()))
-    }
-
-    fn lookup_packed_ref(&self, ref_name: &str) -> Result<Option<ObjectId>, GirError> {
-        let packed_refs_path = self.git_dir.join("packed-refs");
-        if !packed_refs_path.is_file() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&packed_refs_path)?;
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-                continue;
-            }
-            if let Some((sha_str, rname)) = line.split_once(' ') {
-                if rname.trim() == ref_name {
-                    return Ok(Some(ObjectId::from_hex(sha_str.trim())?));
-                }
-            }
-        }
-        Ok(None)
+        parse_revision(self, spec)
     }
 
     /// Enumerates all references (`HEAD`, loose `refs/**`, and `.git/packed-refs`) and their resolved `ObjectId`s.
     /// Loose refs always take precedence over `.git/packed-refs` entries with the same name.
     pub fn list_all_ref_targets(&self) -> Result<Vec<(String, ObjectId)>, GirError> {
-        let mut out = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        if let Ok(head_oid) = self.resolve_ref_to_oid("HEAD") {
-            out.push(("HEAD".to_string(), head_oid));
-            seen.insert("HEAD".to_string());
-        }
-
-        let refs_dir = self.git_dir.join("refs");
-        if refs_dir.is_dir() {
-            self.collect_loose_refs(&refs_dir, &mut out)?;
-            for (name, _) in &out {
-                seen.insert(name.clone());
-            }
-        }
-
-        let packed_refs_path = self.git_dir.join("packed-refs");
-        if packed_refs_path.is_file() {
-            let content = fs::read_to_string(&packed_refs_path)?;
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-                    continue;
-                }
-                if let Some((sha_str, rname)) = line.split_once(' ') {
-                    let ref_name = rname.trim().to_string();
-                    if !seen.contains(&ref_name) {
-                        if let Ok(oid) = ObjectId::from_hex(sha_str.trim()) {
-                            seen.insert(ref_name.clone());
-                            out.push((ref_name, oid));
-                        }
-                    }
-                }
-            }
-        }
-
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(out)
-    }
-
-    fn collect_loose_refs(
-        &self,
-        dir: &Path,
-        out: &mut Vec<(String, ObjectId)>,
-    ) -> Result<(), GirError> {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                self.collect_loose_refs(&path, out)?;
-            } else if path.is_file() {
-                let Some(rel) = path.strip_prefix(&self.git_dir).ok() else {
-                    continue;
-                };
-                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                if rel_str.ends_with(".lock") {
-                    continue;
-                }
-                if let Ok(oid) = self.resolve_ref_to_oid(&rel_str) {
-                    out.push((rel_str, oid));
-                }
-            }
-        }
-        Ok(())
+        self.refs().list_all()
     }
 }
 

@@ -43,6 +43,22 @@ pub enum GirError {
     #[error("missing user identity: please set user.name and user.email via `gir config`")]
     MissingIdentity,
 
+    #[error("ref '{0}' not found")]
+    RefNotFound(String),
+
+    #[error("ref {0} is not a symbolic ref")]
+    NotASymbolicRef(String),
+
+    #[error("cannot lock ref '{reference}': is at {actual} but expected {expected}")]
+    RefCasMismatch {
+        reference: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("ambiguous argument '{0}': unknown revision or path not in the working tree")]
+    InvalidRevision(String),
+
     #[error("{0}")]
     InvalidArgument(String),
 }

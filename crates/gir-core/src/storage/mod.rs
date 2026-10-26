@@ -156,6 +156,21 @@ impl ObjectDatabase {
         }
     }
 
+    /// Computes the shortest unambiguous hexadecimal prefix (at least `min_len`, minimum 4) for `id`.
+    pub fn abbreviate_oid(&self, id: &ObjectId, min_len: usize) -> String {
+        let full = id.to_hex();
+        let start = min_len.clamp(4, ObjectId::HEX_LEN);
+        for len in start..ObjectId::HEX_LEN {
+            let candidate = &full[..len];
+            if let Ok(resolved) = self.resolve_prefix(candidate) {
+                if &resolved == id {
+                    return candidate.to_string();
+                }
+            }
+        }
+        full
+    }
+
     /// Returns a sorted, deduplicated list of all `ObjectId`s present in loose and packed storage.
     pub fn list_all_objects(&self) -> Result<Vec<ObjectId>, GirError> {
         let mut ids = self.loose.list_all()?;
