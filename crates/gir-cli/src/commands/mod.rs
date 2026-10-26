@@ -1,5 +1,10 @@
 pub mod cat_file;
 pub mod config;
+pub mod fsck;
+pub mod gc;
 pub mod hash_object;
+pub mod index_pack;
 pub mod init;
 pub mod ls_tree;
+pub mod pack_objects;
+pub mod unpack_objects;

@@ -153,3 +153,15 @@ pub enum ParsedObject {
     Commit(Commit),
     Tag(Tag),
 }
+
+impl ParsedObject {
+    #[inline]
+    pub fn kind(&self) -> ObjectKind {
+        match self {
+            ParsedObject::Blob(_) => ObjectKind::Blob,
+            ParsedObject::Tree(_) => ObjectKind::Tree,
+            ParsedObject::Commit(_) => ObjectKind::Commit,
+            ParsedObject::Tag(_) => ObjectKind::Tag,
+        }
+    }
+}

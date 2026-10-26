@@ -257,9 +257,101 @@ impl Repository {
                 }
                 return ObjectId::from_hex(trimmed);
             }
+            if let Some(oid) = self.lookup_packed_ref(&current_ref)? {
+                return Ok(oid);
+            }
             break;
         }
         Err(GirError::ObjectNotFound(ref_name.to_string()))
+    }
+
+    fn lookup_packed_ref(&self, ref_name: &str) -> Result<Option<ObjectId>, GirError> {
+        let packed_refs_path = self.git_dir.join("packed-refs");
+        if !packed_refs_path.is_file() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&packed_refs_path)?;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
+                continue;
+            }
+            if let Some((sha_str, rname)) = line.split_once(' ') {
+                if rname.trim() == ref_name {
+                    return Ok(Some(ObjectId::from_hex(sha_str.trim())?));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Enumerates all references (`HEAD`, loose `refs/**`, and `.git/packed-refs`) and their resolved `ObjectId`s.
+    /// Loose refs always take precedence over `.git/packed-refs` entries with the same name.
+    pub fn list_all_ref_targets(&self) -> Result<Vec<(String, ObjectId)>, GirError> {
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        if let Ok(head_oid) = self.resolve_ref_to_oid("HEAD") {
+            out.push(("HEAD".to_string(), head_oid));
+            seen.insert("HEAD".to_string());
+        }
+
+        let refs_dir = self.git_dir.join("refs");
+        if refs_dir.is_dir() {
+            self.collect_loose_refs(&refs_dir, &mut out)?;
+            for (name, _) in &out {
+                seen.insert(name.clone());
+            }
+        }
+
+        let packed_refs_path = self.git_dir.join("packed-refs");
+        if packed_refs_path.is_file() {
+            let content = fs::read_to_string(&packed_refs_path)?;
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
+                    continue;
+                }
+                if let Some((sha_str, rname)) = line.split_once(' ') {
+                    let ref_name = rname.trim().to_string();
+                    if !seen.contains(&ref_name) {
+                        if let Ok(oid) = ObjectId::from_hex(sha_str.trim()) {
+                            seen.insert(ref_name.clone());
+                            out.push((ref_name, oid));
+                        }
+                    }
+                }
+            }
+        }
+
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
+    fn collect_loose_refs(
+        &self,
+        dir: &Path,
+        out: &mut Vec<(String, ObjectId)>,
+    ) -> Result<(), GirError> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                self.collect_loose_refs(&path, out)?;
+            } else if path.is_file() {
+                let Some(rel) = path.strip_prefix(&self.git_dir).ok() else {
+                    continue;
+                };
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                if rel_str.ends_with(".lock") {
+                    continue;
+                }
+                if let Ok(oid) = self.resolve_ref_to_oid(&rel_str) {
+                    out.push((rel_str, oid));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

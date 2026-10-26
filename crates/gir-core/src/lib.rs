@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 pub mod hash;
 pub mod object;
+pub mod pack;
 pub mod repository;
 pub mod storage;
 
