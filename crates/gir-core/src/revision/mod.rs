@@ -47,6 +47,24 @@ pub fn parse_revision(repo: &Repository, spec: &str) -> Result<ObjectId, GirErro
         return Err(GirError::InvalidRevision(spec.to_string()));
     }
 
+    // Handle index stage lookup `:path` or `:<stage>:path`
+    if let Some(after_colon) = spec.strip_prefix(':') {
+        let index = crate::index::GitIndex::read(repo.git_dir())?;
+        let (stage, path) = if after_colon.len() >= 2
+            && after_colon.as_bytes()[0].is_ascii_digit()
+            && after_colon.as_bytes()[1] == b':'
+        {
+            let st = after_colon.as_bytes()[0] - b'0';
+            (st, &after_colon[2..])
+        } else {
+            (0u8, after_colon)
+        };
+        if let Some(entry) = index.get(path, stage) {
+            return Ok(entry.oid);
+        }
+        return Err(GirError::InvalidRevision(spec.to_string()));
+    }
+
     let (base, mut rest) = split_base_and_suffixes(spec);
 
     // 1. Resolve base (handling leading `@{N}` reflog lookups if present)

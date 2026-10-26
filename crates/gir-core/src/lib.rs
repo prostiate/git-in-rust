@@ -1,17 +1,21 @@
 pub mod config;
 pub mod error;
 pub mod hash;
+pub mod ignore;
+pub mod index;
 pub mod object;
 pub mod pack;
 pub mod reflog;
 pub mod refs;
 pub mod repository;
 pub mod revision;
+pub mod status;
 pub mod storage;
 
 pub use config::GitConfig;
 pub use error::GirError;
 pub use hash::ObjectId;
+pub use index::GitIndex;
 pub use object::{ObjectKind, ParsedObject, RawObject};
 pub use refs::RefStore;
 pub use repository::Repository;

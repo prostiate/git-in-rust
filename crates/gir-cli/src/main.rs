@@ -2,8 +2,8 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    cat_file, config, fsck, gc, hash_object, index_pack, init, ls_tree, pack_objects, reflog,
-    rev_parse, symbolic_ref, undo, unpack_objects, update_ref,
+    add, cat_file, config, fsck, gc, hash_object, index_pack, init, ls_files, ls_tree, mv,
+    pack_objects, reflog, rev_parse, rm, status, symbolic_ref, undo, unpack_objects, update_ref,
 };
 
 #[derive(Debug, Parser)]
@@ -72,6 +72,22 @@ enum Commands {
 
     /// Restore working tree, index, and HEAD from a pre-operation safety snapshot
     Undo(undo::UndoArgs),
+
+    /// Show the working tree status
+    Status(status::StatusArgs),
+
+    /// Add file contents to the index
+    Add(add::AddArgs),
+
+    /// Remove files from the working tree and from the index
+    Rm(rm::RmArgs),
+
+    /// Move or rename a file, a directory, or a symlink
+    Mv(mv::MvArgs),
+
+    /// Show information about files in the index and the working tree
+    #[command(name = "ls-files")]
+    LsFiles(ls_files::LsFilesArgs),
 }
 
 fn main() {
@@ -92,6 +108,11 @@ fn main() {
         Commands::RevParse(args) => rev_parse::run(args),
         Commands::Reflog(args) => reflog::run(args),
         Commands::Undo(args) => undo::run(args),
+        Commands::Status(args) => status::run(args),
+        Commands::Add(args) => add::run(args),
+        Commands::Rm(args) => rm::run(args),
+        Commands::Mv(args) => mv::run(args),
+        Commands::LsFiles(args) => ls_files::run(args),
     };
 
     if let Err(err) = result {

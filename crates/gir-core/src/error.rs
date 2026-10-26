@@ -28,6 +28,9 @@ pub enum GirError {
     #[error("corrupt packfile or index '{path}': {reason}")]
     CorruptPack { path: PathBuf, reason: String },
 
+    #[error("corrupt .git/index file: {0}")]
+    CorruptIndex(String),
+
     #[error("object hash mismatch: expected {expected}, computed {actual}")]
     HashMismatch { expected: String, actual: String },
 
