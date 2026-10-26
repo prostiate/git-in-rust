@@ -1,0 +1,21 @@
+[package]
+name = "gir-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gir"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+gir-core.workspace = true
+gir-transport.workspace = true
+gir-tui.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

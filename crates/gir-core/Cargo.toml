@@ -1,0 +1,16 @@
+[package]
+name = "gir-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+flate2.workspace = true
+libc.workspace = true
+memmap2.workspace = true
+rayon.workspace = true
+sha1.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
