@@ -2,8 +2,9 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    add, cat_file, config, fsck, gc, hash_object, index_pack, init, ls_files, ls_tree, mv,
-    pack_objects, reflog, rev_parse, rm, status, symbolic_ref, undo, unpack_objects, update_ref,
+    add, branch, cat_file, commit, commit_tree, config, fsck, gc, hash_object, index_pack, init,
+    log, ls_files, ls_tree, mv, pack_objects, read_tree, reflog, rev_parse, rm, show, status,
+    symbolic_ref, tag, undo, unpack_objects, update_ref, write_tree,
 };
 
 #[derive(Debug, Parser)]
@@ -88,6 +89,33 @@ enum Commands {
     /// Show information about files in the index and the working tree
     #[command(name = "ls-files")]
     LsFiles(ls_files::LsFilesArgs),
+
+    /// Create a tree object from the current index
+    #[command(name = "write-tree")]
+    WriteTree(write_tree::WriteTreeArgs),
+
+    /// Reads tree information into the index
+    #[command(name = "read-tree")]
+    ReadTree(read_tree::ReadTreeArgs),
+
+    /// Create a new commit object from a tree
+    #[command(name = "commit-tree")]
+    CommitTree(commit_tree::CommitTreeArgs),
+
+    /// Record changes to the repository
+    Commit(commit::CommitArgs),
+
+    /// List, create, or delete branches
+    Branch(branch::BranchArgs),
+
+    /// Create, list, or delete a tag object
+    Tag(tag::TagArgs),
+
+    /// Show commit logs
+    Log(log::LogArgs),
+
+    /// Show various types of objects (commits, tags, trees, blobs)
+    Show(show::ShowArgs),
 }
 
 fn main() {
@@ -113,6 +141,14 @@ fn main() {
         Commands::Rm(args) => rm::run(args),
         Commands::Mv(args) => mv::run(args),
         Commands::LsFiles(args) => ls_files::run(args),
+        Commands::WriteTree(args) => write_tree::run(args),
+        Commands::ReadTree(args) => read_tree::run(args),
+        Commands::CommitTree(args) => commit_tree::run(args),
+        Commands::Commit(args) => commit::run(args),
+        Commands::Branch(args) => branch::run(args),
+        Commands::Tag(args) => tag::run(args),
+        Commands::Log(args) => log::run(args),
+        Commands::Show(args) => show::run(args),
     };
 
     if let Err(err) = result {

@@ -1,6 +1,10 @@
+pub mod branch_ops;
+pub mod commit_ops;
 pub mod config;
 pub mod error;
+pub mod graph;
 pub mod hash;
+pub mod hooks;
 pub mod ignore;
 pub mod index;
 pub mod object;
@@ -11,6 +15,7 @@ pub mod repository;
 pub mod revision;
 pub mod status;
 pub mod storage;
+pub mod tag_ops;
 
 pub use config::GitConfig;
 pub use error::GirError;

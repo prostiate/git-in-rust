@@ -90,6 +90,53 @@ impl Signature {
             tz_offset: tz_str.trim().to_string(),
         })
     }
+
+    /// Formats this signature's timestamp and timezone offset into Git's human-readable date string
+    /// (`"Sun Oct 27 10:33:20 2024 +0700"`).
+    pub fn format_human_date(&self) -> String {
+        let offset_secs = parse_tz_offset_secs(&self.tz_offset);
+        let local_epoch = self.timestamp + offset_secs;
+
+        unsafe {
+            let time_val = local_epoch as libc::time_t;
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::gmtime_r(&time_val, &mut tm).is_null() {
+                return format!("{} {}", self.timestamp, self.tz_offset);
+            }
+
+            const WDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            const MONTHS: [&str; 12] = [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ];
+
+            let wday = WDAYS.get(tm.tm_wday as usize).copied().unwrap_or("Sun");
+            let mon = MONTHS.get(tm.tm_mon as usize).copied().unwrap_or("Jan");
+            let mday = tm.tm_mday;
+            let hour = tm.tm_hour;
+            let min = tm.tm_min;
+            let sec = tm.tm_sec;
+            let year = tm.tm_year + 1900;
+
+            format!(
+                "{wday} {mon} {mday} {hour:02}:{min:02}:{sec:02} {year} {}",
+                self.tz_offset
+            )
+        }
+    }
+}
+
+fn parse_tz_offset_secs(tz: &str) -> i64 {
+    let trimmed = tz.trim();
+    if trimmed.len() != 5 {
+        return 0;
+    }
+    let sign = match trimmed.as_bytes()[0] {
+        b'-' => -1i64,
+        _ => 1i64,
+    };
+    let hours: i64 = trimmed[1..3].parse().unwrap_or(0);
+    let mins: i64 = trimmed[3..5].parse().unwrap_or(0);
+    sign * (hours * 3600 + mins * 60)
 }
 
 impl fmt::Display for Signature {

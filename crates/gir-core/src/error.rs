@@ -62,6 +62,9 @@ pub enum GirError {
     #[error("ambiguous argument '{0}': unknown revision or path not in the working tree")]
     InvalidRevision(String),
 
+    #[error("you have unmerged paths in the index; resolve conflicts before writing a tree or committing")]
+    UnmergedIndexEntries,
+
     #[error("{0}")]
     InvalidArgument(String),
 }

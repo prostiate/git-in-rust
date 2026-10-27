@@ -1,6 +1,7 @@
 pub mod codec;
 pub mod entry;
 pub mod extensions;
+pub mod tree_builder;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,7 +11,7 @@ use std::path::Path;
 
 use crate::error::GirError;
 use crate::hash::ObjectId;
-use crate::object::tree::{FileMode, Tree, TreeEntry};
+use crate::object::tree::FileMode;
 use crate::object::ParsedObject;
 use crate::storage::atomic::LockFile;
 use crate::storage::ObjectDatabase;
@@ -18,6 +19,7 @@ use crate::storage::ObjectDatabase;
 pub use codec::{parse_index_bytes, serialize_index_bytes};
 pub use entry::IndexEntry;
 pub use extensions::IndexExtension;
+pub use tree_builder::write_index_to_tree;
 
 /// In-memory representation of `.git/index` (DIRC v2/v3), keyed by `(path, stage)`.
 #[derive(Debug, Clone, Default)]
@@ -214,17 +216,8 @@ impl GitIndex {
     /// Builds a hierarchical Git `Tree` object graph in `odb` from the current stage-0 index entries
     /// and returns the root `Tree`'s `ObjectId`.
     pub fn write_tree(&self, odb: &ObjectDatabase) -> Result<ObjectId, GirError> {
-        if self.has_conflicts() {
-            return Err(GirError::InvalidArgument(
-                "cannot write-tree with unmerged conflict entries in index".to_string(),
-            ));
-        }
-        let stage0: Vec<&IndexEntry> = self
-            .entries
-            .values()
-            .filter(|e| e.stage() == 0)
-            .collect();
-        write_subtree(odb, &stage0, "")
+        let (root_oid, _) = tree_builder::build_tree_from_entries(self, odb)?;
+        Ok(root_oid)
     }
 
     /// Drops any cached `TREE` extension so official `/usr/bin/git commit` never uses stale cached tree SHAs.
@@ -269,51 +262,4 @@ fn flatten_tree_into(
         }
     }
     Ok(())
-}
-
-fn write_subtree(
-    odb: &ObjectDatabase,
-    entries: &[&IndexEntry],
-    dir_prefix: &str,
-) -> Result<ObjectId, GirError> {
-    let mut tree_entries: Vec<TreeEntry> = Vec::new();
-    let mut subdirs: BTreeMap<String, Vec<&IndexEntry>> = BTreeMap::new();
-
-    for &entry in entries {
-        let rel = if dir_prefix.is_empty() {
-            entry.path.as_str()
-        } else {
-            entry
-                .path
-                .strip_prefix(dir_prefix)
-                .and_then(|s| s.strip_prefix('/'))
-                .unwrap_or("")
-        };
-
-        if let Some((first_seg, _)) = rel.split_once('/') {
-            subdirs
-                .entry(first_seg.to_string())
-                .or_default()
-                .push(entry);
-        } else if !rel.is_empty() {
-            tree_entries.push(TreeEntry::new(
-                entry.file_mode(),
-                rel.to_string(),
-                entry.oid,
-            ));
-        }
-    }
-
-    for (subdir_name, sub_entries) in subdirs {
-        let sub_prefix = if dir_prefix.is_empty() {
-            subdir_name.clone()
-        } else {
-            format!("{dir_prefix}/{subdir_name}")
-        };
-        let sub_oid = write_subtree(odb, &sub_entries, &sub_prefix)?;
-        tree_entries.push(TreeEntry::new(FileMode::Directory, subdir_name, sub_oid));
-    }
-
-    let tree = Tree::new(tree_entries);
-    odb.write_object(&tree.to_raw())
 }
