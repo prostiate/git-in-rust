@@ -1,7 +1,8 @@
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::error::GirError;
 use crate::repository::Repository;
@@ -39,6 +40,43 @@ pub fn run_hook(repo: &Repository, hook_name: &str, args: &[&str]) -> Result<boo
         .args(args)
         .current_dir(cwd)
         .status()?;
+
+    if !status.success() {
+        return Err(GirError::InvalidArgument(format!(
+            "hook '{hook_name}' exited with non-zero status ({})",
+            status.code().unwrap_or(1)
+        )));
+    }
+
+    Ok(true)
+}
+
+/// Executes a Git hook script (`pre-push`, etc.) passing `stdin_bytes` on standard input.
+pub fn run_hook_with_stdin(
+    repo: &Repository,
+    hook_name: &str,
+    args: &[&str],
+    stdin_bytes: &[u8],
+) -> Result<bool, GirError> {
+    let hook_path = resolve_hooks_dir(repo).join(hook_name);
+    let Ok(meta) = fs::metadata(&hook_path) else {
+        return Ok(false);
+    };
+    if !meta.is_file() || (meta.permissions().mode() & 0o111) == 0 {
+        return Ok(false);
+    }
+
+    let cwd = repo.worktree().unwrap_or_else(|| repo.git_dir());
+    let mut child = Command::new(&hook_path)
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = stdin.write_all(stdin_bytes);
+    }
+    let status = child.wait()?;
 
     if !status.success() {
         return Err(GirError::InvalidArgument(format!(

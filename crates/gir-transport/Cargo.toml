@@ -8,3 +8,6 @@ license.workspace = true
 [dependencies]
 gir-core.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

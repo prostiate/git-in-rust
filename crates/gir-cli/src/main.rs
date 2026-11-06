@@ -2,10 +2,11 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    add, branch, cat_file, checkout, cherry_pick, clean, commit, commit_tree, config, diff, fsck,
-    gc, hash_object, index_pack, init, log, ls_files, ls_tree, merge, merge_base, mv, pack_objects,
-    read_tree, rebase, reflog, reset, restore, rev_parse, rm, show, stash, status, switch,
-    symbolic_ref, tag, undo, unpack_objects, update_ref, write_tree,
+    add, branch, cat_file, checkout, cherry_pick, clean, clone, commit, commit_tree, config, diff,
+    fetch, fsck, gc, hash_object, index_pack, init, log, ls_files, ls_tree, merge, merge_base, mv,
+    pack_objects, pull, push, read_tree, rebase, reflog, remote, reset, restore, rev_parse, rm,
+    show, stash, status, switch, symbolic_ref, tag, tui, undo, unpack_objects, update_ref,
+    write_tree,
 };
 
 #[derive(Debug, Parser)]
@@ -152,6 +153,24 @@ enum Commands {
 
     /// Reapply commits on top of another base tip
     Rebase(rebase::RebaseArgs),
+
+    /// Manage set of tracked repositories
+    Remote(remote::RemoteArgs),
+
+    /// Clone a repository into a new directory
+    Clone(clone::CloneArgs),
+
+    /// Download objects and refs from another repository
+    Fetch(fetch::FetchArgs),
+
+    /// Fetch from and integrate with another repository or a local branch
+    Pull(pull::PullArgs),
+
+    /// Update remote refs along with associated objects
+    Push(push::PushArgs),
+
+    /// Launch the interactive multi-pane terminal user interface
+    Tui(tui::TuiArgs),
 }
 
 fn main() {
@@ -196,6 +215,12 @@ fn main() {
         Commands::Merge(args) => merge::run(args),
         Commands::CherryPick(args) => cherry_pick::run(args),
         Commands::Rebase(args) => rebase::run(args),
+        Commands::Remote(args) => remote::run(args),
+        Commands::Clone(args) => clone::run(args),
+        Commands::Fetch(args) => fetch::run(args),
+        Commands::Pull(args) => pull::run(args),
+        Commands::Push(args) => push::run(args),
+        Commands::Tui(args) => tui::run(args),
     };
 
     if let Err(err) = result {

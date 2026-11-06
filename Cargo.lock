@@ -273,6 +273,7 @@ name = "gir-transport"
 version = "0.1.0"
 dependencies = [
  "gir-core",
+ "tempfile",
  "thiserror",
 ]
 
@@ -282,6 +283,8 @@ version = "0.1.0"
 dependencies = [
  "gir-core",
  "gir-transport",
+ "libc",
+ "tempfile",
  "thiserror",
 ]
 
