@@ -438,7 +438,7 @@ pub fn prune_empty_parent_dirs(removed_file: &Path, worktree: &Path) {
     }
 }
 
-fn dir_contains_untracked_file(
+pub(crate) fn dir_contains_untracked_file(
     abs_dir: &Path,
     rel_dir: &str,
     head_tree_map: &BTreeMap<String, (FileMode, ObjectId)>,

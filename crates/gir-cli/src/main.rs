@@ -2,10 +2,10 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    add, branch, cat_file, checkout, clean, commit, commit_tree, config, diff, fsck, gc,
-    hash_object, index_pack, init, log, ls_files, ls_tree, mv, pack_objects, read_tree, reflog,
-    reset, restore, rev_parse, rm, show, stash, status, switch, symbolic_ref, tag, undo,
-    unpack_objects, update_ref, write_tree,
+    add, branch, cat_file, checkout, cherry_pick, clean, commit, commit_tree, config, diff, fsck,
+    gc, hash_object, index_pack, init, log, ls_files, ls_tree, merge, merge_base, mv, pack_objects,
+    read_tree, rebase, reflog, reset, restore, rev_parse, rm, show, stash, status, switch,
+    symbolic_ref, tag, undo, unpack_objects, update_ref, write_tree,
 };
 
 #[derive(Debug, Parser)]
@@ -138,6 +138,20 @@ enum Commands {
 
     /// Stash the changes in a dirty working directory away
     Stash(stash::StashArgs),
+
+    /// Find as good common ancestors as possible for a merge
+    #[command(name = "merge-base")]
+    MergeBase(merge_base::MergeBaseArgs),
+
+    /// Join two or more development histories together
+    Merge(merge::MergeArgs),
+
+    /// Apply the changes introduced by some existing commits
+    #[command(name = "cherry-pick")]
+    CherryPick(cherry_pick::CherryPickArgs),
+
+    /// Reapply commits on top of another base tip
+    Rebase(rebase::RebaseArgs),
 }
 
 fn main() {
@@ -178,6 +192,10 @@ fn main() {
         Commands::Restore(args) => restore::run(args),
         Commands::Clean(args) => clean::run(args),
         Commands::Stash(args) => stash::run(args),
+        Commands::MergeBase(args) => merge_base::run(args),
+        Commands::Merge(args) => merge::run(args),
+        Commands::CherryPick(args) => cherry_pick::run(args),
+        Commands::Rebase(args) => rebase::run(args),
     };
 
     if let Err(err) = result {

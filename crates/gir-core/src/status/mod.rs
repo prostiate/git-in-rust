@@ -48,6 +48,29 @@ impl FileStatusEntry {
         let y = self.worktree_status.map(DeltaStatus::as_char).unwrap_or(' ');
         format!("{x}{y} {}", self.path)
     }
+
+    /// Returns `true` if this entry represents an unmerged conflict (`UU`, `AA`, `UD`, `DU`, `AU`, `UA`, `DD`).
+    pub fn is_unmerged(&self) -> bool {
+        self.index_status == Some(DeltaStatus::Conflicted)
+            || self.worktree_status == Some(DeltaStatus::Conflicted)
+            || (self.index_status == Some(DeltaStatus::Added)
+                && self.worktree_status == Some(DeltaStatus::Added))
+            || (self.index_status == Some(DeltaStatus::Deleted)
+                && self.worktree_status == Some(DeltaStatus::Deleted))
+    }
+
+    /// Returns the human-readable description for an unmerged entry in `git status`.
+    pub fn unmerged_label(&self) -> &'static str {
+        match (self.index_status, self.worktree_status) {
+            (Some(DeltaStatus::Added), Some(DeltaStatus::Added)) => "both added:",
+            (Some(DeltaStatus::Deleted), Some(DeltaStatus::Deleted)) => "both deleted:",
+            (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Deleted)) => "deleted by them:",
+            (Some(DeltaStatus::Deleted), Some(DeltaStatus::Conflicted)) => "deleted by us:",
+            (Some(DeltaStatus::Added), Some(DeltaStatus::Conflicted)) => "added by us:",
+            (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Added)) => "added by them:",
+            _ => "both modified:",
+        }
+    }
 }
 
 /// Upstream tracking summary (`origin/main`, ahead/behind counts).
@@ -180,25 +203,24 @@ impl StatusReport {
         let staged: Vec<&FileStatusEntry> = self
             .entries
             .iter()
-            .filter(|e| e.index_status.is_some() && e.index_status != Some(DeltaStatus::Conflicted))
+            .filter(|e| !e.is_unmerged() && e.index_status.is_some())
             .collect();
         let conflicted: Vec<&FileStatusEntry> = self
             .entries
             .iter()
-            .filter(|e| e.index_status == Some(DeltaStatus::Conflicted))
+            .filter(|e| e.is_unmerged())
             .collect();
         let unstaged: Vec<&FileStatusEntry> = self
             .entries
             .iter()
-            .filter(|e| {
-                e.worktree_status.is_some() && e.worktree_status != Some(DeltaStatus::Conflicted)
-            })
+            .filter(|e| !e.is_unmerged() && e.worktree_status.is_some())
             .collect();
 
         if !conflicted.is_empty() {
             out.push_str("Unmerged paths:\n");
             for c in &conflicted {
-                out.push_str(&format!("\tboth modified:   {}\n", c.path));
+                let label = c.unmerged_label();
+                out.push_str(&format!("\t{label:16} {}\n", c.path));
             }
             out.push('\n');
         }
@@ -278,12 +300,14 @@ pub fn compute_status(repo: &Repository, opts: StatusOptions) -> Result<StatusRe
     let index_mtime = index.index_mtime_sec();
 
     let mut stage0_map: BTreeMap<String, &IndexEntry> = BTreeMap::new();
-    let mut conflicted_paths: HashSet<String> = HashSet::new();
+    let mut conflict_stages: BTreeMap<String, [bool; 3]> = BTreeMap::new();
     for entry in index.entries() {
-        if entry.stage() == 0 {
+        let st = entry.stage();
+        if st == 0 {
             stage0_map.insert(entry.path.clone(), entry);
-        } else {
-            conflicted_paths.insert(entry.path.clone());
+        } else if (1..=3).contains(&st) {
+            let flags = conflict_stages.entry(entry.path.clone()).or_insert([false; 3]);
+            flags[(st - 1) as usize] = true;
         }
     }
 
@@ -291,15 +315,22 @@ pub fn compute_status(repo: &Repository, opts: StatusOptions) -> Result<StatusRe
     let mut status_map: BTreeMap<String, (Option<DeltaStatus>, Option<DeltaStatus>)> =
         BTreeMap::new();
 
-    for c_path in &conflicted_paths {
-        status_map.insert(
-            c_path.clone(),
-            (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Conflicted)),
-        );
+    for (c_path, &[s1, s2, s3]) in &conflict_stages {
+        let pair = match (s1, s2, s3) {
+            (true, true, true) => (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Conflicted)), // UU
+            (false, true, true) => (Some(DeltaStatus::Added), Some(DeltaStatus::Added)),          // AA
+            (true, true, false) => (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Deleted)),   // UD
+            (true, false, true) => (Some(DeltaStatus::Deleted), Some(DeltaStatus::Conflicted)),   // DU
+            (false, true, false) => (Some(DeltaStatus::Added), Some(DeltaStatus::Conflicted)),    // AU
+            (false, false, true) => (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Added)),    // UA
+            (true, false, false) => (Some(DeltaStatus::Deleted), Some(DeltaStatus::Deleted)),     // DD
+            (false, false, false) => (Some(DeltaStatus::Conflicted), Some(DeltaStatus::Conflicted)),
+        };
+        status_map.insert(c_path.clone(), pair);
     }
 
     for (path, &(head_mode, head_blob_oid)) in &head_files {
-        if conflicted_paths.contains(path) {
+        if conflict_stages.contains_key(path) {
             continue;
         }
         match stage0_map.get(path) {
@@ -315,7 +346,7 @@ pub fn compute_status(repo: &Repository, opts: StatusOptions) -> Result<StatusRe
     }
 
     for (path, _) in &stage0_map {
-        if !head_files.contains_key(path) && !conflicted_paths.contains(path) {
+        if !head_files.contains_key(path) && !conflict_stages.contains_key(path) {
             status_map.insert(path.clone(), (Some(DeltaStatus::Added), None));
         }
     }

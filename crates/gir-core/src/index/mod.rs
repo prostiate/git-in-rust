@@ -107,21 +107,37 @@ impl GitIndex {
         false
     }
 
+    /// Returns the raw index extensions (`TREE`, `REUC`, etc.).
+    pub fn extensions(&self) -> &[IndexExtension] {
+        &self.extensions
+    }
+
     /// Returns `true` if the index currently contains any unmerged conflict entries (`stage in 1..=3`).
     pub fn has_conflicts(&self) -> bool {
         self.entries.keys().any(|(_, stage)| *stage != 0)
     }
 
-    /// Inserts or updates a stage-0 `IndexEntry`, clearing any conflict stages (`1..=3`),
-    /// removing any conflicting file/directory ancestor or descendant entries,
-    /// and invalidating the `TREE` cache-tree extension so subsequent `git commit` reads fresh entries.
+    /// Inserts or updates an `IndexEntry`:
+    /// - If `stage == 0`, clears any conflict stages (`1..=3`) and appends a `REUC` (Resolve-Undo) record if conflict stages were present.
+    /// - If `stage in 1..=3`, removes any stage `0` entry for `path`.
+    /// Also removes any conflicting file/directory ancestor or descendant entries and invalidates the `TREE` extension.
     pub fn add_entry(&mut self, entry: IndexEntry) {
         let path = entry.path.clone();
         let stage = entry.stage();
         if stage == 0 {
-            for s in 1..=3 {
-                self.entries.remove(&(path.clone(), s));
+            let mut removed_stages: [Option<(u32, ObjectId)>; 3] = [None, None, None];
+            let mut had_conflict = false;
+            for s in 1..=3u8 {
+                if let Some(old) = self.entries.remove(&(path.clone(), s)) {
+                    removed_stages[(s - 1) as usize] = Some((old.mode, old.oid));
+                    had_conflict = true;
+                }
             }
+            if had_conflict {
+                self.record_reuc(&path, removed_stages);
+            }
+        } else {
+            self.entries.remove(&(path.clone(), 0));
         }
 
         // Remove any ancestor file entries (e.g. if adding `foo/bar.txt`, remove file `foo`)
@@ -150,15 +166,59 @@ impl GitIndex {
         self.invalidate_cache_tree();
     }
 
-    /// Removes all stages (`0..=3`) for `path` from the index and invalidates the `TREE` extension.
+    /// Replaces stage 0 for `path` with unmerged conflict stages `1 (base)`, `2 (ours)`, `3 (theirs)`.
+    pub fn set_conflict_stages(
+        &mut self,
+        path: &str,
+        base: Option<(FileMode, ObjectId)>,
+        ours: Option<(FileMode, ObjectId)>,
+        theirs: Option<(FileMode, ObjectId)>,
+    ) {
+        for s in 0..=3 {
+            self.entries.remove(&(path.to_string(), s));
+        }
+        if let Some((m, oid)) = base {
+            self.add_entry(IndexEntry::from_tree_entry(path.to_string(), m, oid, 1));
+        }
+        if let Some((m, oid)) = ours {
+            self.add_entry(IndexEntry::from_tree_entry(path.to_string(), m, oid, 2));
+        }
+        if let Some((m, oid)) = theirs {
+            self.add_entry(IndexEntry::from_tree_entry(path.to_string(), m, oid, 3));
+        }
+        self.invalidate_cache_tree();
+    }
+
+    fn record_reuc(&mut self, path: &str, stages: [Option<(u32, ObjectId)>; 3]) {
+        let reuc_bytes = extensions::encode_reuc_record(path, stages);
+        if let Some(ext) = self.extensions.iter_mut().find(|e| e.is_resolve_undo()) {
+            ext.data.extend_from_slice(&reuc_bytes);
+        } else {
+            self.extensions.push(IndexExtension {
+                signature: *b"REUC",
+                data: reuc_bytes,
+            });
+        }
+    }
+
+    /// Removes all stages (`0..=3`) for `path` from the index, recording a `REUC` entry if conflict stages were resolved.
     pub fn remove_path(&mut self, path: &str) -> Option<IndexEntry> {
         let mut removed = None;
-        for s in 0..=3 {
+        let mut removed_stages: [Option<(u32, ObjectId)>; 3] = [None, None, None];
+        let mut had_conflict = false;
+        for s in 0..=3u8 {
             if let Some(e) = self.entries.remove(&(path.to_string(), s)) {
+                if s >= 1 {
+                    removed_stages[(s - 1) as usize] = Some((e.mode, e.oid));
+                    had_conflict = true;
+                }
                 if s == 0 || removed.is_none() {
                     removed = Some(e);
                 }
             }
+        }
+        if had_conflict {
+            self.record_reuc(path, removed_stages);
         }
         if removed.is_some() {
             self.invalidate_cache_tree();
@@ -175,25 +235,19 @@ impl GitIndex {
             format!("{clean}/")
         };
 
-        let keys_to_remove: Vec<(String, u8)> = self
+        let mut matching_paths: Vec<String> = self
             .entries
             .keys()
             .filter(|(p, _)| clean.is_empty() || p == clean || p.starts_with(&slash_prefix))
-            .cloned()
+            .map(|(p, _)| p.clone())
             .collect();
+        matching_paths.sort();
+        matching_paths.dedup();
 
-        let mut removed_paths = Vec::new();
-        for key in keys_to_remove {
-            if self.entries.remove(&key).is_some() {
-                removed_paths.push(key.0);
-            }
+        for p in &matching_paths {
+            self.remove_path(p);
         }
-        removed_paths.sort();
-        removed_paths.dedup();
-        if !removed_paths.is_empty() {
-            self.invalidate_cache_tree();
-        }
-        removed_paths
+        matching_paths
     }
 
     /// Replaces the entire index with entries flattened from `tree_oid` in `odb`.
