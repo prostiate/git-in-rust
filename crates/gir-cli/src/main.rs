@@ -2,9 +2,10 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    add, branch, cat_file, commit, commit_tree, config, fsck, gc, hash_object, index_pack, init,
-    log, ls_files, ls_tree, mv, pack_objects, read_tree, reflog, rev_parse, rm, show, status,
-    symbolic_ref, tag, undo, unpack_objects, update_ref, write_tree,
+    add, branch, cat_file, checkout, clean, commit, commit_tree, config, diff, fsck, gc,
+    hash_object, index_pack, init, log, ls_files, ls_tree, mv, pack_objects, read_tree, reflog,
+    reset, restore, rev_parse, rm, show, stash, status, switch, symbolic_ref, tag, undo,
+    unpack_objects, update_ref, write_tree,
 };
 
 #[derive(Debug, Parser)]
@@ -116,6 +117,27 @@ enum Commands {
 
     /// Show various types of objects (commits, tags, trees, blobs)
     Show(show::ShowArgs),
+
+    /// Show changes between commits, commit and working tree, etc.
+    Diff(diff::DiffArgs),
+
+    /// Switch branches
+    Switch(switch::SwitchArgs),
+
+    /// Switch branches or restore working tree files
+    Checkout(checkout::CheckoutArgs),
+
+    /// Reset current HEAD to the specified state
+    Reset(reset::ResetArgs),
+
+    /// Restore working tree files
+    Restore(restore::RestoreArgs),
+
+    /// Remove untracked files from the working tree
+    Clean(clean::CleanArgs),
+
+    /// Stash the changes in a dirty working directory away
+    Stash(stash::StashArgs),
 }
 
 fn main() {
@@ -149,6 +171,13 @@ fn main() {
         Commands::Tag(args) => tag::run(args),
         Commands::Log(args) => log::run(args),
         Commands::Show(args) => show::run(args),
+        Commands::Diff(args) => diff::run(args),
+        Commands::Switch(args) => switch::run(args),
+        Commands::Checkout(args) => checkout::run(args),
+        Commands::Reset(args) => reset::run(args),
+        Commands::Restore(args) => restore::run(args),
+        Commands::Clean(args) => clean::run(args),
+        Commands::Stash(args) => stash::run(args),
     };
 
     if let Err(err) = result {

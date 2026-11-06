@@ -1,8 +1,10 @@
 use std::env;
 use std::fs;
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use gir_core::diff::{apply_hunks_to_blob, diff_index_to_worktree};
 use gir_core::ignore::IgnoreStack;
 use gir_core::index::{GitIndex, IndexEntry};
 use gir_core::{GirError, ObjectKind, Repository};
@@ -17,6 +19,10 @@ pub struct AddArgs {
     /// Update the index just where it already has an entry matching <pathspec> (`-u` / `--update`)
     #[arg(short = 'u', long = "update")]
     pub update: bool,
+
+    /// Interactively choose hunks of patch between the index and the work tree (`-p` / `--patch`)
+    #[arg(short = 'p', long = "patch")]
+    pub patch: bool,
 
     /// Allow adding otherwise ignored files
     #[arg(short = 'f', long = "force")]
@@ -37,6 +43,17 @@ pub fn run(args: AddArgs) -> Result<(), GirError> {
 
     let mut index = GitIndex::read(repo.git_dir())?;
     let root_ignore = IgnoreStack::for_repository(&repo);
+
+    if args.patch {
+        let prefixes = if args.pathspecs.is_empty() {
+            Vec::new()
+        } else {
+            normalize_pathspecs(&cwd, &worktree, &args.pathspecs)
+        };
+        run_interactive_patch(&repo, &worktree, &mut index, &prefixes)?;
+        index.write(repo.git_dir())?;
+        return Ok(());
+    }
 
     if args.update {
         let prefixes = normalize_pathspecs(&cwd, &worktree, &args.pathspecs);
@@ -275,5 +292,137 @@ fn stage_tracked_updates(
             }
         }
     }
+    Ok(())
+}
+
+fn run_interactive_patch(
+    repo: &Repository,
+    worktree: &Path,
+    index: &mut GitIndex,
+    pathspecs: &[String],
+) -> Result<(), GirError> {
+    let patches = diff_index_to_worktree(repo, index, pathspecs)?;
+    if patches.is_empty() {
+        println!("No changes.");
+        return Ok(());
+    }
+
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut quit_all = false;
+
+    for file_patch in &patches {
+        if file_patch.hunks.is_empty() {
+            continue;
+        }
+        let Some(old_oid) = file_patch.old_oid else {
+            continue;
+        };
+        let base_bytes = repo.odb().read_raw(&old_oid)?.data;
+
+        println!("diff --git a/{0} b/{0}", file_patch.path);
+        println!("--- a/{}", file_patch.path);
+        println!("+++ b/{}", file_patch.path);
+
+        let total_hunks = file_patch.hunks.len();
+        let mut selected = Vec::new();
+        let mut finish_file = false;
+
+        for (idx, hunk) in file_patch.hunks.iter().enumerate() {
+            print!("{hunk}");
+            loop {
+                print!(
+                    "({}/{}) Stage this hunk [y,n,q,a,d,?]? ",
+                    idx + 1,
+                    total_hunks
+                );
+                io::stdout().flush()?;
+
+                let mut line = String::new();
+                let n = reader.read_line(&mut line)?;
+                if n == 0 {
+                    quit_all = true;
+                    break;
+                }
+                match line.trim() {
+                    "y" | "Y" => {
+                        selected.push(hunk);
+                        break;
+                    }
+                    "n" | "N" => {
+                        break;
+                    }
+                    "a" | "A" => {
+                        for rem in &file_patch.hunks[idx..] {
+                            selected.push(rem);
+                        }
+                        finish_file = true;
+                        break;
+                    }
+                    "d" | "D" => {
+                        finish_file = true;
+                        break;
+                    }
+                    "q" | "Q" => {
+                        quit_all = true;
+                        break;
+                    }
+                    _ => {
+                        println!(
+                            "y - stage this hunk\nn - do not stage this hunk\nq - quit; do not stage this hunk or any of the remaining ones\na - stage this hunk and all later hunks in the file\nd - do not stage this hunk or any of the later hunks in the file"
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            if quit_all || finish_file {
+                break;
+            }
+        }
+
+        if !selected.is_empty() {
+            let new_bytes = apply_hunks_to_blob(&base_bytes, &selected)?;
+            let new_oid = repo.odb().write_raw(ObjectKind::Blob, &new_bytes)?;
+            let mode = file_patch
+                .new_mode
+                .or(file_patch.old_mode)
+                .unwrap_or(gir_core::object::tree::FileMode::Regular);
+
+            if selected.len() == total_hunks {
+                let abs_path = worktree.join(&file_patch.path);
+                if let Ok(meta) = fs::symlink_metadata(&abs_path) {
+                    index.add_entry(IndexEntry::from_metadata(
+                        &file_patch.path,
+                        new_oid,
+                        0,
+                        &meta,
+                    ));
+                } else {
+                    index.add_entry(IndexEntry::from_tree_entry(
+                        file_patch.path.clone(),
+                        mode,
+                        new_oid,
+                        0,
+                    ));
+                }
+            } else {
+                // Partial hunk staging: set mtime=0 so `gir status` always detects the remaining unstaged hunks
+                let mut entry = IndexEntry::from_tree_entry(
+                    file_patch.path.clone(),
+                    mode,
+                    new_oid,
+                    0,
+                );
+                entry.file_size = new_bytes.len() as u32;
+                index.add_entry(entry);
+            }
+        }
+
+        if quit_all {
+            break;
+        }
+    }
+
     Ok(())
 }

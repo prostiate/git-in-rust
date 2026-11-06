@@ -571,96 +571,18 @@ pub enum LineEdit<'a> {
     Insert(&'a str),
 }
 
-/// Computes a sequence of line edits (`Equal`, `Delete`, `Insert`) between `old_lines` and `new_lines`.
+/// Computes a sequence of line edits (`Equal`, `Delete`, `Insert`) between `old_lines` and `new_lines`
+/// using the unified $O(ND)$ Myers diff engine.
 pub fn compute_line_edits<'a>(old_lines: &[&'a str], new_lines: &[&'a str]) -> Vec<LineEdit<'a>> {
-    // Trim common prefix and suffix first for fast O(N) handling on typical edits
-    let mut start = 0usize;
-    while start < old_lines.len()
-        && start < new_lines.len()
-        && old_lines[start] == new_lines[start]
-    {
-        start += 1;
-    }
-
-    let mut old_end = old_lines.len();
-    let mut new_end = new_lines.len();
-    while old_end > start
-        && new_end > start
-        && old_lines[old_end - 1] == new_lines[new_end - 1]
-    {
-        old_end -= 1;
-        new_end -= 1;
-    }
-
-    let mut out = Vec::with_capacity(old_lines.len() + new_lines.len());
-    for &line in &old_lines[..start] {
-        out.push(LineEdit::Equal(line));
-    }
-
-    let mid_old = &old_lines[start..old_end];
-    let mid_new = &new_lines[start..new_end];
-
-    let n = mid_old.len();
-    let m = mid_new.len();
-
-    if n == 0 {
-        for &line in mid_new {
-            out.push(LineEdit::Insert(line));
-        }
-    } else if m == 0 {
-        for &line in mid_old {
-            out.push(LineEdit::Delete(line));
-        }
-    } else if n.saturating_mul(m) <= 4_000_000 {
-        // Exact DP LCS on the differing middle slice
-        let width = m + 1;
-        let mut dp = vec![0u32; (n + 1) * width];
-        for i in (0..n).rev() {
-            for j in (0..m).rev() {
-                dp[i * width + j] = if mid_old[i] == mid_new[j] {
-                    dp[(i + 1) * width + (j + 1)] + 1
-                } else {
-                    dp[(i + 1) * width + j].max(dp[i * width + (j + 1)])
-                };
-            }
-        }
-        let mut i = 0;
-        let mut j = 0;
-        while i < n && j < m {
-            if mid_old[i] == mid_new[j] {
-                out.push(LineEdit::Equal(mid_old[i]));
-                i += 1;
-                j += 1;
-            } else if dp[(i + 1) * width + j] >= dp[i * width + (j + 1)] {
-                out.push(LineEdit::Delete(mid_old[i]));
-                i += 1;
-            } else {
-                out.push(LineEdit::Insert(mid_new[j]));
-                j += 1;
-            }
-        }
-        while i < n {
-            out.push(LineEdit::Delete(mid_old[i]));
-            i += 1;
-        }
-        while j < m {
-            out.push(LineEdit::Insert(mid_new[j]));
-            j += 1;
-        }
-    } else {
-        for &line in mid_old {
-            out.push(LineEdit::Delete(line));
-        }
-        for &line in mid_new {
-            out.push(LineEdit::Insert(line));
-        }
-    }
-
-    for &line in &old_lines[old_end..] {
-        out.push(LineEdit::Equal(line));
-    }
-
-    out
+    use crate::diff::myers::{myers_diff, EditOp};
+    myers_diff(old_lines, new_lines)
+        .into_iter()
+        .map(|op| match op {
+            EditOp::Equal(line) => LineEdit::Equal(line),
+            EditOp::Delete(line) => LineEdit::Delete(line),
+            EditOp::Insert(line) => LineEdit::Insert(line),
+        })
+        .collect()
 }
 
 /// Formats a unified diff patch (`diff --git a/<path> b/<path>`) for a `FileChangeStat`.
